@@ -39,10 +39,10 @@ impl PianoBorder {
         bottom_left: (f64, f64),
     ) -> Self {
         PianoBorder {
-            tl: top_left.ibv_into(),
-            tr: top_right.ibv_into(),
-            br: bottom_right.ibv_into(),
-            bl: bottom_left.ibv_into(),
+            tl: top_left.ib_into(),
+            tr: top_right.ib_into(),
+            br: bottom_right.ib_into(),
+            bl: bottom_left.ib_into(),
         }
     }
 }
@@ -154,8 +154,8 @@ impl Piano3D {
             (piano2d.width, piano2d.height),
             (0.0, piano2d.height),
         );
-        let src_points: Vector<Point2d> = border2d.ibv_into();
-        let dst_points: Vector<Point2d> = border.clone().ibv_into();
+        let src_points: Vector<Point2d> = border2d.ib_into();
+        let dst_points: Vector<Point2d> = border.clone().ib_into();
         let h_matrix =
             opencv::calib3d::find_homography(&src_points, &dst_points, &mut no_array(), 0, 5.0)
                 .unwrap();
@@ -174,10 +174,10 @@ impl Piano for Piano3D {
         match &self.key_boxes[key] {
             Some(verts) => verts.clone(),
             None => {
-                let verts2d: Vector<Point2d> = self.piano2d.key_box(key).ibv_into();
+                let verts2d: Vector<Point2d> = self.piano2d.key_box(key).ib_into();
                 let mut verts: Vector<Point2d> = Vector::new();
                 opencv::core::perspective_transform(&verts2d, &mut verts, &self.h_matrix).unwrap();
-                let verts: Vector<Point> = verts.ibv_into();
+                let verts: Vector<Point> = verts.ib_into();
                 self.key_boxes[key] = Some(verts.clone());
                 verts
             }
