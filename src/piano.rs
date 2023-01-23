@@ -1,5 +1,5 @@
 use opencv::{
-    core::{no_array, Point, Point2d, Vector},
+    core::{no_array, Point2d, Vector},
     prelude::Mat,
 };
 
@@ -13,32 +13,32 @@ pub struct Piano2D {
     key_types: Vec<bool>,
     key_type_indices: Vec<usize>,
     n_white_keys: usize,
-    key_boxes: Vec<Option<Vector<Point>>>,
+    key_ib_rects: Vec<Option<IbRectangle>>,
 }
 
 pub struct Piano3D {
-    pub border: PianoBorder,
-    piano2d: Piano2D,
+    pub border: IbRectangle,
+    pub piano2d: Piano2D,
     h_matrix: Mat,
-    key_boxes: Vec<Option<Vector<Point>>>,
+    key_ib_rects: Vec<Option<IbRectangle>>,
 }
 
 #[derive(Clone, Copy)]
-pub struct PianoBorder {
+pub struct IbRectangle {
     pub tl: Point2d,
     pub tr: Point2d,
     pub br: Point2d,
     pub bl: Point2d,
 }
 
-impl PianoBorder {
+impl IbRectangle {
     pub fn new(
         top_left: (f64, f64),
         top_right: (f64, f64),
         bottom_right: (f64, f64),
         bottom_left: (f64, f64),
     ) -> Self {
-        PianoBorder {
+        IbRectangle {
             tl: top_left.ib_into(),
             tr: top_right.ib_into(),
             br: bottom_right.ib_into(),
@@ -48,8 +48,9 @@ impl PianoBorder {
 }
 
 pub trait Piano {
-    fn key_box(&mut self, key: usize) -> Vector<Point>;
-    fn key_is_black(&self, key: usize) -> bool;
+    fn get_ib_rect(&mut self, key: usize) -> IbRectangle;
+    fn get_vector(&mut self, key: usize) -> Vector<Point2d>;
+    fn is_black(&self, key: usize) -> bool;
 }
 
 pub const KEY_PATTERN: [bool; 12] = [
@@ -81,17 +82,17 @@ impl Piano2D {
             key_types,
             key_type_indices,
             n_white_keys,
-            key_boxes: vec![None; n_keys],
+            key_ib_rects: vec![None; n_keys],
         }
     }
 }
 
 impl Piano for Piano2D {
-    fn key_box(&mut self, key: usize) -> Vector<Point> {
-        match &self.key_boxes[key] {
-            Some(verts) => verts.clone(),
+    fn get_ib_rect(&mut self, key: usize) -> IbRectangle {
+        match &self.key_ib_rects[key] {
+            Some(ib_rect) => ib_rect.clone(),
             None => {
-                let mut verts = Vector::new();
+                let ib_rect: IbRectangle;
                 let white_key_width = self.width / self.n_white_keys as f64;
                 if self.key_types[key] {
                     let mut w_group = vec![key - 1, key + 1];
@@ -123,39 +124,47 @@ impl Piano for Piano2D {
                             * (2.0 * b_group.iter().position(|&k| k == key).unwrap() as f64 + 1.0);
                     let key_rx = key_lx + white_key_width * 0.5;
                     let key_height = self.height * 0.65;
-                    verts.push(Point::new(key_lx as i32, 0));
-                    verts.push(Point::new(key_rx as i32, 0));
-                    verts.push(Point::new(key_rx as i32, key_height as i32));
-                    verts.push(Point::new(key_lx as i32, key_height as i32));
+                    ib_rect = IbRectangle {
+                        tl: Point2d::new(key_lx, 0.0),
+                        tr: Point2d::new(key_rx, 0.0),
+                        br: Point2d::new(key_rx, key_height),
+                        bl: Point2d::new(key_lx, key_height),
+                    };
                 } else {
                     let key_lx = self.key_type_indices[key] as f64 * white_key_width;
                     let key_rx = key_lx + white_key_width;
-                    verts.push(Point::new(key_lx as i32, 0));
-                    verts.push(Point::new(key_rx as i32, 0));
-                    verts.push(Point::new(key_rx as i32, self.height as i32));
-                    verts.push(Point::new(key_lx as i32, self.height as i32));
+                    ib_rect = IbRectangle {
+                        tl: Point2d::new(key_lx, 0.0),
+                        tr: Point2d::new(key_rx, 0.0),
+                        br: Point2d::new(key_rx, self.height),
+                        bl: Point2d::new(key_lx, self.height),
+                    };
                 }
-                self.key_boxes[key] = Some(verts.clone());
-                verts
+                self.key_ib_rects[key] = Some(ib_rect);
+                ib_rect
             }
         }
     }
 
-    fn key_is_black(&self, key: usize) -> bool {
+    fn get_vector(&mut self, key: usize) -> Vector<Point2d> {
+        self.get_ib_rect(key).ib_into()
+    }
+
+    fn is_black(&self, key: usize) -> bool {
         self.key_types[key]
     }
 }
 
 impl Piano3D {
-    pub fn new(border: PianoBorder, piano2d: Piano2D) -> Self {
-        let border2d = PianoBorder::new(
+    pub fn new(border: IbRectangle, piano2d: Piano2D) -> Self {
+        let border2d = IbRectangle::new(
             (0.0, 0.0),
             (piano2d.width, 0.0),
             (piano2d.width, piano2d.height),
             (0.0, piano2d.height),
         );
         let src_points: Vector<Point2d> = border2d.ib_into();
-        let dst_points: Vector<Point2d> = border.clone().ib_into();
+        let dst_points: Vector<Point2d> = border.ib_into();
         let h_matrix =
             opencv::calib3d::find_homography(&src_points, &dst_points, &mut no_array(), 0, 5.0)
                 .unwrap();
@@ -164,27 +173,35 @@ impl Piano3D {
             border,
             piano2d,
             h_matrix,
-            key_boxes: vec![None; n_keys],
+            key_ib_rects: vec![None; n_keys],
         }
+    }
+
+    pub fn perspective_transform(&self, src: &Vector<Point2d>) -> Vector<Point2d> {
+        let mut dst: Vector<Point2d> = Vector::new();
+        opencv::core::perspective_transform(&src, &mut dst, &self.h_matrix).unwrap();
+        dst
     }
 }
 
 impl Piano for Piano3D {
-    fn key_box(&mut self, key: usize) -> Vector<Point> {
-        match &self.key_boxes[key] {
-            Some(verts) => verts.clone(),
+    fn get_ib_rect(&mut self, key: usize) -> IbRectangle {
+        match &self.key_ib_rects[key] {
+            Some(ib_rect) => ib_rect.clone(),
             None => {
-                let verts2d: Vector<Point2d> = self.piano2d.key_box(key).ib_into();
-                let mut verts: Vector<Point2d> = Vector::new();
-                opencv::core::perspective_transform(&verts2d, &mut verts, &self.h_matrix).unwrap();
-                let verts: Vector<Point> = verts.ib_into();
-                self.key_boxes[key] = Some(verts.clone());
-                verts
+                let src: Vector<Point2d> = self.piano2d.get_vector(key);
+                let ib_rect: IbRectangle = self.perspective_transform(&src).ib_into();
+                self.key_ib_rects[key] = Some(ib_rect);
+                ib_rect
             }
         }
     }
 
-    fn key_is_black(&self, key: usize) -> bool {
+    fn get_vector(&mut self, key: usize) -> Vector<Point2d> {
+        self.get_ib_rect(key).ib_into()
+    }
+
+    fn is_black(&self, key: usize) -> bool {
         self.piano2d.key_types[key]
     }
 }
